@@ -34,12 +34,13 @@ package edu.temple.cla.papolicy.wolfgang.loaddbfromxlsx;
 import edu.temple.cla.policydb.dbutilities.ColumnMetaData;
 import edu.temple.cla.policydb.dbutilities.DBUtil;
 import static edu.temple.cla.policydb.dbutilities.DBUtil.doubleQuotes;
+import java.io.IOException;
 import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Clock;
+import java.sql.Statement;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -72,8 +73,8 @@ public class DoUpload {
     private static final long MS_PER_DAY = 24 * 3600 * 1000;
     private static final long BASE_TIME = LocalDate.of(1899, 12, 31).toEpochDay();
     private static final LocalDate FEB28_1900 = LocalDate.of(1900, 2, 28);
-    private static final long FEB28_1900_NUM_DAYS = 
-            (FEB28_1900.toEpochDay() - BASE_TIME);
+    private static final long FEB28_1900_NUM_DAYS
+            = (FEB28_1900.toEpochDay() - BASE_TIME);
 
     private final DataSource dataSource;
     private Map<String, String> legalToOriginal;
@@ -84,8 +85,9 @@ public class DoUpload {
     }
 
     public void run(InputStream input, String tableName) {
-        try {
-            XSSFWorkbook wb = new XSSFWorkbook(input);
+        try (XSSFWorkbook wb = new XSSFWorkbook(input);
+                Connection conn = dataSource.getConnection();
+                Statement stmt = conn.createStatement();) {
             XSSFSheet sheet = wb.getSheetAt(0);
             Iterator<Row> rowIterator = sheet.iterator();
             Row firstRow = rowIterator.next();
@@ -103,19 +105,29 @@ public class DoUpload {
                     case STRING:
                         int columnIndex = cell.getColumnIndex();
                         String columnValue = cell.getStringCellValue();
-                        columnNames.set(columnIndex, columnValue);
+                        columnNames.add(columnIndex, columnValue);
                         columnNamesToIndex.put(columnValue, columnIndex);
                         break;
                 }
             });
-            Connection conn = dataSource.getConnection();
             DatabaseMetaData metaData = conn.getMetaData();
             List<ColumnMetaData> columnList;
             try (ResultSet rs2 = metaData.getColumns(null, null, tableName, null)) {
                 columnList = ColumnMetaData.getColumnMetaDataList(rs2);
             }
             List<ColumnMetaData> newColumnList = createNewColumnList(columnList);
-            
+            StringJoiner values = new StringJoiner(",\n");
+            rowIterator.forEachRemaining(row -> {
+                buildValuesList(row, columnList, newColumnList)
+                        .ifPresent(values::add);
+            });
+            String sqlInsertStatement = DBUtil.buildSqlInsertStatement(tableName, newColumnList);
+            String insert = sqlInsertStatement + "\n" + values.toString();
+            stmt.executeUpdate(insert);
+        } catch (IOException ioex) {
+            LOGGER.error("Unable to open workbook", ioex);
+        }catch (SQLException sqlex) {
+            LOGGER.error("Error accessing database", sqlex);
         } catch (Exception e) {
             LOGGER.error("Error processing ", e);
         }
@@ -129,42 +141,48 @@ public class DoUpload {
             legalToOriginal.put(dbColumnName, columnName);
         });
         columnList.stream()
-                .filter((metaData)-> (legalToOriginal.get(metaData.getColumnName()) != null))
+                .filter((metaData) -> (legalToOriginal.get(metaData.getColumnName()) != null))
                 .forEach(newColumnList::add);
         return newColumnList;
     }
 
-        public Optional<String> buildValuesList(Row row,
+    public Optional<String> buildValuesList(Row row,
             List<ColumnMetaData> metaDataList,
-            List<ColumnMetaData> newColumnList) throws SQLException, Exception {
+            List<ColumnMetaData> newColumnList) {
         Map<String, String> record = new HashMap<>();
         for (Cell cell : row) {
             int columnIndex = cell.getColumnIndex();
             String value = null;
             CellType cellType = cell.getCellTypeEnum();
-                switch (cellType) {
-                    case _NONE: break;
-                    case BLANK: break;
-                    case BOOLEAN: 
-                        value = Boolean.toString(cell.getBooleanCellValue());
-                        break;
-                    case ERROR: break;
-                    case FORMULA: break;
-                    case NUMERIC:
-                        value = Double.toString(cell.getNumericCellValue());
-                        break;
-                    case STRING:
-                        value = cell.getStringCellValue();
-                        break;
-                    default:
-                        break;
-                }
+            switch (cellType) {
+                case _NONE:
+                    break;
+                case BLANK:
+                    break;
+                case BOOLEAN:
+                    value = Boolean.toString(cell.getBooleanCellValue());
+                    break;
+                case ERROR:
+                    break;
+                case FORMULA:
+                    break;
+                case NUMERIC:
+                    value = Double.toString(cell.getNumericCellValue());
+                    break;
+                case STRING:
+                    value = cell.getStringCellValue();
+                    break;
+                default:
+                    break;
+            }
             if (value != null) {
                 record.put(columnNames.get(columnIndex), value);
             }
             columnIndex++;
         }
-        if (record.isEmpty()) return Optional.empty();
+        if (record.isEmpty()) {
+            return Optional.empty();
+        }
         StringJoiner valuesList = new StringJoiner(", ", "(", ")");
         for (ColumnMetaData metaData : metaDataList) {
             int columnType = metaData.getDataType();
@@ -196,36 +214,35 @@ public class DoUpload {
                             break;
                         case java.sql.Types.TIMESTAMP:
                         case java.sql.Types.DATE:
-                            valuesList.add("'" + value + "'");
+                            valuesList.add("'" + excelDateToDate(value) + "'");
                             break;
                         default:
-                            System.err.println("Unrecognized type: " + columnType);
-                            System.err.println("Type name: " + columnName);
-                            throw new Exception();
+                            String message = "Unrecognized type: " + columnType
+                                    + " Type name: " + columnName;
+                            return Optional.empty();
                     }
                 }
             }
         }
         return Optional.of(valuesList.toString());
     }
-        
+
     public static String removeFraction(String number) {
         int posDot = number.indexOf(".");
         return number.substring(posDot);
     }
-    
+
     public static String excelDateToDate(String excelDateString) {
         double excelDate = Double.parseDouble(excelDateString);
-        long numberOfDays = (long)excelDate;
-        double partOfDay = excelDate - numberOfDays;
+        long numberOfDays = (long) excelDate;
         if (numberOfDays > FEB28_1900_NUM_DAYS) {
             numberOfDays--;
         }
-        long javaDateValue = (numberOfDays + BASE_TIME)*MS_PER_DAY + (long)(partOfDay * MS_PER_DAY);
+        long javaDateValue = (numberOfDays + BASE_TIME) * MS_PER_DAY;
         Instant javaInstant = Instant.ofEpochMilli(javaDateValue);
         LocalDateTime javaDateTime = LocalDateTime.ofInstant(javaInstant, ZoneOffset.UTC);
         String javaDateString = javaDateTime.format(ISO_LOCAL_DATE);
         return javaDateString;
     }
-    
+
 }

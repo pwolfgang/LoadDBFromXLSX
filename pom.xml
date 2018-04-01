@@ -83,7 +83,7 @@
                         <manifest>
                             <addClasspath>true</addClasspath>
                             <classpathPrefix>lib</classpathPrefix>
-                            <mainClass>edu.temple.cla.policydb.loaddbfromxlxs.Main</mainClass>
+                            <mainClass>edu.temple.cla.papolicy.wolfgang.loaddbfromxlsx.Main</mainClass>
                         </manifest>
                     </archive>
                 </configuration>    
