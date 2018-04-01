@@ -19,7 +19,7 @@ public class Main {
     public static void main(String[] args) throws Exception {
         DataSource dataSource = new SimpleDataSource(args[0]);
         DoUpload doUpload = new DoUpload(dataSource);
-        InputStream input = new FileInputStream(args[1]);
-        doUpload.run(input);
+        InputStream input = new FileInputStream(args[2]);
+        doUpload.run(input, args[1]);
     }    
 }
