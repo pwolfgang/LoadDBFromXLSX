@@ -51,9 +51,11 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 import javax.sql.DataSource;
 import org.apache.log4j.Logger;
 import org.apache.poi.ss.usermodel.Cell;
@@ -77,22 +79,35 @@ public class DoUpload {
             = (FEB28_1900.toEpochDay() - BASE_TIME);
 
     private final DataSource dataSource;
-    private Map<String, String> legalToOriginal;
-    private List<String> columnNames;
+    private Map<String, String> databaseToSpteadsheetNames;
+    private List<String> spreadsheetColumnNames;
 
+    /**
+     * Constructor.
+     * @param dataSource The dataSource referencing the database. 
+     */
     public DoUpload(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
-    public void run(InputStream input, String tableName) {
+    /**
+     * Main program login.
+     * @param input Input stream containing the xlsx file.
+     * @param sheetName Worksheet name containing the data.
+     * @param tableName Name of the destination table.
+     */
+    public void run(InputStream input, String sheetName, String tableName) {
         try (XSSFWorkbook wb = new XSSFWorkbook(input);
                 Connection conn = dataSource.getConnection();
                 Statement stmt = conn.createStatement();) {
-            XSSFSheet sheet = wb.getSheetAt(0);
+            XSSFSheet sheet = wb.getSheet(sheetName);
+            if (sheet == null) {
+                throw new Exception("Sheet " + sheetName + " does not exist");
+            }
             Iterator<Row> rowIterator = sheet.iterator();
             Row firstRow = rowIterator.next();
             Map<String, Integer> columnNamesToIndex = new TreeMap<>();
-            columnNames = new ArrayList<>();
+            spreadsheetColumnNames = new ArrayList<>();
             firstRow.forEach(cell -> {
                 CellType cellType = cell.getCellTypeEnum();
                 switch (cellType) {
@@ -105,23 +120,23 @@ public class DoUpload {
                     case STRING:
                         int columnIndex = cell.getColumnIndex();
                         String columnValue = cell.getStringCellValue();
-                        columnNames.add(columnIndex, columnValue);
+                        spreadsheetColumnNames.add(columnIndex, columnValue);
                         columnNamesToIndex.put(columnValue, columnIndex);
                         break;
                 }
             });
             DatabaseMetaData metaData = conn.getMetaData();
-            List<ColumnMetaData> columnList;
+            List<ColumnMetaData> databaseColumnMetadataList;
             try (ResultSet rs2 = metaData.getColumns(null, null, tableName, null)) {
-                columnList = ColumnMetaData.getColumnMetaDataList(rs2);
+                databaseColumnMetadataList = ColumnMetaData.getColumnMetaDataList(rs2);
             }
-            List<ColumnMetaData> newColumnList = createNewColumnList(columnList);
+            List<ColumnMetaData> filteredColumnList = filterColumnList(databaseColumnMetadataList);
             StringJoiner values = new StringJoiner(",\n");
             rowIterator.forEachRemaining(row -> {
-                buildValuesList(row, columnList, newColumnList)
+                buildValuesList(row, filteredColumnList)
                         .ifPresent(values::add);
             });
-            String sqlInsertStatement = DBUtil.buildSqlInsertStatement(tableName, newColumnList);
+            String sqlInsertStatement = DBUtil.buildSqlInsertStatement(tableName, filteredColumnList);
             String insert = sqlInsertStatement + "\n" + values.toString();
             stmt.executeUpdate(insert);
         } catch (IOException ioex) {
@@ -133,22 +148,35 @@ public class DoUpload {
         }
     }
 
-    List<ColumnMetaData> createNewColumnList(List<ColumnMetaData> columnList) {
-        legalToOriginal = new HashMap<>();
+    /**
+     * Method to create the database column list from the spreadsheet columns
+     * and filters our any spreadsheet column that does not have a corresponding
+     * database column. This name translation is included since spreadsheets
+     * may contain names from an Access database that do not represent legal
+     * MySQL names. As a side-effect the Map databaseToSpteadsheetNames is initialized.
+     * @param columnList The list of spreadsheet column names.
+     * @return The filtered list of legal database column names.
+     */
+    List<ColumnMetaData> filterColumnList(List<ColumnMetaData> columnList) {
+        databaseToSpteadsheetNames = new HashMap<>();
         List<ColumnMetaData> newColumnList = new ArrayList<>();
-        columnNames.forEach((columnName) -> {
+        spreadsheetColumnNames.forEach((columnName) -> {
             String dbColumnName = DBUtil.convertToLegalName(columnName).toString();
-            legalToOriginal.put(dbColumnName, columnName);
+            databaseToSpteadsheetNames.put(dbColumnName, columnName);
         });
-        columnList.stream()
-                .filter((metaData) -> (legalToOriginal.get(metaData.getColumnName()) != null))
-                .forEach(newColumnList::add);
-        return newColumnList;
+        return columnList.stream()
+                .filter(metadata -> Objects.nonNull(databaseToSpteadsheetNames.get(metadata.getColumnName())))
+                .collect(Collectors.toList());
     }
 
+    /**
+     * Method to build the list of values for a row.
+     * @param row The spreadsheet row.
+     * @param metaDataList The list of column metadata for each database column.
+     * @return 
+     */
     public Optional<String> buildValuesList(Row row,
-            List<ColumnMetaData> metaDataList,
-            List<ColumnMetaData> newColumnList) {
+            List<ColumnMetaData> metaDataList) {
         Map<String, String> record = new HashMap<>();
         for (Cell cell : row) {
             int columnIndex = cell.getColumnIndex();
@@ -165,6 +193,7 @@ public class DoUpload {
                 case ERROR:
                     break;
                 case FORMULA:
+                    LOGGER.error("Cell " + cell.getAddress() + " contains a formula");
                     break;
                 case NUMERIC:
                     value = Double.toString(cell.getNumericCellValue());
@@ -176,7 +205,7 @@ public class DoUpload {
                     break;
             }
             if (value != null) {
-                record.put(columnNames.get(columnIndex), value);
+                record.put(spreadsheetColumnNames.get(columnIndex), value);
             }
             columnIndex++;
         }
@@ -187,9 +216,9 @@ public class DoUpload {
         for (ColumnMetaData metaData : metaDataList) {
             int columnType = metaData.getDataType();
             String columnName = metaData.getColumnName();
-            String originalColumnName = legalToOriginal.get(columnName);
-            if (originalColumnName != null) {
-                String value = record.get(originalColumnName);
+            String spreadsheetColumnName = databaseToSpteadsheetNames.get(columnName);
+            if (spreadsheetColumnName != null) {
+                String value = record.get(spreadsheetColumnName);
                 if (value == null || value.isEmpty()) {
                     valuesList.add("NULL");
                 } else {
@@ -229,7 +258,8 @@ public class DoUpload {
 
     public static String removeFraction(String number) {
         int posDot = number.indexOf(".");
-        return number.substring(posDot);
+        if (posDot == -1) return number;
+        return number.substring(0,posDot);
     }
 
     public static String excelDateToDate(String excelDateString) {
