@@ -106,25 +106,7 @@ public class DoUpload {
             }
             Iterator<Row> rowIterator = sheet.iterator();
             Row firstRow = rowIterator.next();
-            Map<String, Integer> columnNamesToIndex = new TreeMap<>();
-            spreadsheetColumnNames = new ArrayList<>();
-            firstRow.forEach(cell -> {
-                CellType cellType = cell.getCellTypeEnum();
-                switch (cellType) {
-                    case _NONE:
-                    case BLANK:
-                    case BOOLEAN:
-                    case ERROR:
-                    case FORMULA:
-                    case NUMERIC:
-                    case STRING:
-                        int columnIndex = cell.getColumnIndex();
-                        String columnValue = cell.getStringCellValue();
-                        spreadsheetColumnNames.add(columnIndex, columnValue);
-                        columnNamesToIndex.put(columnValue, columnIndex);
-                        break;
-                }
-            });
+            getSpreadsheetColumnNames(firstRow);
             DatabaseMetaData metaData = conn.getMetaData();
             List<ColumnMetaData> databaseColumnMetadataList;
             try (ResultSet rs2 = metaData.getColumns(null, null, tableName, null)) {
@@ -146,6 +128,26 @@ public class DoUpload {
         } catch (Exception e) {
             LOGGER.error("Error processing ", e);
         }
+    }
+
+    public void getSpreadsheetColumnNames(Row firstRow) {
+        spreadsheetColumnNames = new ArrayList<>();
+        firstRow.forEach(cell -> {
+            CellType cellType = cell.getCellTypeEnum();
+            switch (cellType) {
+                case _NONE:
+                case BLANK:
+                case BOOLEAN:
+                case ERROR:
+                case FORMULA:
+                case NUMERIC:
+                case STRING:
+                    int columnIndex = cell.getColumnIndex();
+                    String columnValue = cell.getStringCellValue();
+                    spreadsheetColumnNames.add(columnIndex, columnValue);
+                    break;
+            }
+        });
     }
 
     /**
