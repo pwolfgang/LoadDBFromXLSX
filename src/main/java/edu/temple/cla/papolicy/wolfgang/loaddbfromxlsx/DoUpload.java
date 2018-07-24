@@ -84,7 +84,8 @@ public class DoUpload {
 
     /**
      * Constructor.
-     * @param dataSource The dataSource referencing the database. 
+     *
+     * @param dataSource The dataSource referencing the database.
      */
     public DoUpload(DataSource dataSource) {
         this.dataSource = dataSource;
@@ -92,6 +93,7 @@ public class DoUpload {
 
     /**
      * Main program login.
+     *
      * @param input Input stream containing the xlsx file.
      * @param sheetName Worksheet name containing the data.
      * @param tableName Name of the destination table.
@@ -113,17 +115,26 @@ public class DoUpload {
                 databaseColumnMetadataList = ColumnMetaData.getColumnMetaDataList(rs2);
             }
             List<ColumnMetaData> filteredColumnList = filterColumnList(databaseColumnMetadataList);
-            StringJoiner values = new StringJoiner(",\n");
-            rowIterator.forEachRemaining(row -> {
-                buildValuesList(row, filteredColumnList)
-                        .ifPresent(values::add);
-            });
-            String sqlInsertStatement = DBUtil.buildSqlInsertStatement(tableName, filteredColumnList);
-            String insert = sqlInsertStatement + "\n" + values.toString();
-            stmt.executeUpdate(insert);
+            while (rowIterator.hasNext()) {
+                StringJoiner values = new StringJoiner(",\n");
+                while (rowIterator.hasNext() && values.length() < 16000000) {
+                    Row row = rowIterator.next();
+                    buildValuesList(row, filteredColumnList)
+                            .ifPresent(values::add);
+                }
+                String sqlInsertStatement = DBUtil.buildSqlInsertStatement(tableName, filteredColumnList);
+                String insert = sqlInsertStatement + "\n" + values.toString();
+                try {
+                    stmt.executeUpdate(insert);
+                } catch (SQLException sqlex) {
+                    System.err.println("Error in SQL");
+                    System.err.println(insert);
+                    throw sqlex;
+                }
+            }
         } catch (IOException ioex) {
             LOGGER.error("Unable to open workbook", ioex);
-        }catch (SQLException sqlex) {
+        } catch (SQLException sqlex) {
             LOGGER.error("Error accessing database", sqlex);
         } catch (Exception e) {
             LOGGER.error("Error processing ", e);
@@ -153,9 +164,11 @@ public class DoUpload {
     /**
      * Method to create the database column list from the spreadsheet columns
      * and filters our any spreadsheet column that does not have a corresponding
-     * database column. This name translation is included since spreadsheets
-     * may contain names from an Access database that do not represent legal
-     * MySQL names. As a side-effect the Map databaseToSpteadsheetNames is initialized.
+     * database column. This name translation is included since spreadsheets may
+     * contain names from an Access database that do not represent legal MySQL
+     * names. As a side-effect the Map databaseToSpteadsheetNames is
+     * initialized.
+     *
      * @param columnList The list of spreadsheet column names.
      * @return The filtered list of legal database column names.
      */
@@ -173,9 +186,10 @@ public class DoUpload {
 
     /**
      * Method to build the list of values for a row.
+     *
      * @param row The spreadsheet row.
      * @param metaDataList The list of column metadata for each database column.
-     * @return 
+     * @return
      */
     public Optional<String> buildValuesList(Row row,
             List<ColumnMetaData> metaDataList) {
@@ -260,8 +274,10 @@ public class DoUpload {
 
     public static String removeFraction(String number) {
         int posDot = number.indexOf(".");
-        if (posDot == -1) return number;
-        return number.substring(0,posDot);
+        if (posDot == -1) {
+            return number;
+        }
+        return number.substring(0, posDot);
     }
 
     public static String excelDateToDate(String excelDateString) {
