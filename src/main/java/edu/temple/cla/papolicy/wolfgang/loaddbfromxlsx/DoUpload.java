@@ -117,7 +117,7 @@ public class DoUpload {
             List<ColumnMetaData> filteredColumnList = filterColumnList(databaseColumnMetadataList);
             while (rowIterator.hasNext()) {
                 StringJoiner values = new StringJoiner(",\n");
-                while (rowIterator.hasNext() && values.length() < 16000000) {
+                while (rowIterator.hasNext() && values.length() < 10000000) {
                     Row row = rowIterator.next();
                     buildValuesList(row, filteredColumnList)
                             .ifPresent(values::add);
