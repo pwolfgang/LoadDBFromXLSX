@@ -54,7 +54,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.StringJoiner;
-import java.util.TreeMap;
 import java.util.stream.Collectors;
 import javax.sql.DataSource;
 import org.apache.log4j.Logger;
@@ -92,7 +91,7 @@ public class DoUpload {
     }
 
     /**
-     * Main program login.
+     * Main program.
      *
      * @param input Input stream containing the xlsx file.
      * @param sheetName Worksheet name containing the data.
@@ -144,19 +143,24 @@ public class DoUpload {
     public void getSpreadsheetColumnNames(Row firstRow) {
         spreadsheetColumnNames = new ArrayList<>();
         firstRow.forEach(cell -> {
-            CellType cellType = cell.getCellTypeEnum();
-            switch (cellType) {
-                case _NONE:
-                case BLANK:
-                case BOOLEAN:
-                case ERROR:
-                case FORMULA:
-                case NUMERIC:
-                case STRING:
-                    int columnIndex = cell.getColumnIndex();
-                    String columnValue = cell.getStringCellValue();
-                    spreadsheetColumnNames.add(columnIndex, columnValue);
-                    break;
+            try {
+                CellType cellType = cell.getCellTypeEnum();
+                switch (cellType) {
+                    case _NONE:
+                    case BLANK:
+                    case BOOLEAN:
+                    case ERROR:
+                    case FORMULA:
+                    case NUMERIC:
+                    case STRING:
+                        int columnIndex = cell.getColumnIndex();
+                        String columnValue = cell.getStringCellValue();
+                        spreadsheetColumnNames.add(columnIndex, columnValue);
+                        break;
+                }
+            } catch (Exception ex) {
+                throw new RuntimeException("Error processing first row, column "
+                        + cell.getColumnIndex(), ex);
             }
         });
     }
@@ -195,35 +199,41 @@ public class DoUpload {
             List<ColumnMetaData> metaDataList) {
         Map<String, String> record = new HashMap<>();
         for (Cell cell : row) {
-            int columnIndex = cell.getColumnIndex();
-            String value = null;
-            CellType cellType = cell.getCellTypeEnum();
-            switch (cellType) {
-                case _NONE:
-                    break;
-                case BLANK:
-                    break;
-                case BOOLEAN:
-                    value = Boolean.toString(cell.getBooleanCellValue());
-                    break;
-                case ERROR:
-                    break;
-                case FORMULA:
-                    LOGGER.error("Cell " + cell.getAddress() + " contains a formula");
-                    break;
-                case NUMERIC:
-                    value = Double.toString(cell.getNumericCellValue());
-                    break;
-                case STRING:
-                    value = cell.getStringCellValue();
-                    break;
-                default:
-                    break;
+            try {
+                int columnIndex = cell.getColumnIndex();
+                String value = null;
+                CellType cellType = cell.getCellTypeEnum();
+                switch (cellType) {
+                    case _NONE:
+                        break;
+                    case BLANK:
+                        break;
+                    case BOOLEAN:
+                        value = Boolean.toString(cell.getBooleanCellValue());
+                        break;
+                    case ERROR:
+                        break;
+                    case FORMULA:
+                        LOGGER.error("Cell " + cell.getAddress() + " contains a formula");
+                        break;
+                    case NUMERIC:
+                        value = Double.toString(cell.getNumericCellValue());
+                        break;
+                    case STRING:
+                        value = cell.getStringCellValue();
+                        break;
+                    default:
+                        break;
+                }
+                if (value != null) {
+                    record.put(spreadsheetColumnNames.get(columnIndex), value);
+                }
+                columnIndex++;
+            } catch (Exception ex) {
+                String message = String.format("Error processing row: %d, column: %d",
+                        cell.getRowIndex(), cell.getColumnIndex());
+                throw new RuntimeException(message, ex);
             }
-            if (value != null) {
-                record.put(spreadsheetColumnNames.get(columnIndex), value);
-            }
-            columnIndex++;
         }
         if (record.isEmpty()) {
             return Optional.empty();

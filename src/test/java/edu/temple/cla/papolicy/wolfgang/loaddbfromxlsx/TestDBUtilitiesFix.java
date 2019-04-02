@@ -40,12 +40,12 @@ import org.junit.Test;
  * @author Paul
  */
 public class TestDBUtilitiesFix {
-    
+
     @Test
     public void testTrailingBackslash() {
         String input = "This is a test\\";
         String expected = "This is a test";
         assertEquals(expected, DBUtil.doubleQuotes(input).toString());
     }
-    
+
 }
