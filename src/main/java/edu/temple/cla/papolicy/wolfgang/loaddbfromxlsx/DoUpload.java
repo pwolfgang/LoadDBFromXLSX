@@ -245,7 +245,7 @@ public class DoUpload {
             String spreadsheetColumnName = databaseToSpteadsheetNames.get(columnName);
             if (spreadsheetColumnName != null) {
                 String value = record.get(spreadsheetColumnName);
-                if (value == null || value.isEmpty()) {
+                if (value == null || value.isEmpty() || value.equals("null")) {
                     valuesList.add("NULL");
                 } else {
                     switch (columnType) {
@@ -263,6 +263,7 @@ public class DoUpload {
                             valuesList.add(DBUtil.removeCommas(value));
                             break;
                         case java.sql.Types.BIT:
+                        case java.sql.Types.TINYINT:
                         case java.sql.Types.SMALLINT:
                         case java.sql.Types.INTEGER:
                             valuesList.add(removeFraction(value));
