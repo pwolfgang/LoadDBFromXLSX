@@ -217,7 +217,7 @@ public class DoUpload {
                         LOGGER.error("Cell " + cell.getAddress() + " contains a formula");
                         break;
                     case NUMERIC:
-                        value = Double.toString(cell.getNumericCellValue());
+                        value = String.format("%.0f", cell.getNumericCellValue());
                         break;
                     case STRING:
                         value = cell.getStringCellValue();
